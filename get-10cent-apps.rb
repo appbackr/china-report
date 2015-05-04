@@ -1,0 +1,146 @@
+# This script uses the MixRank API to get the full list of devices with specific installed SDKs
+
+require 'mysql2'
+require 'csv'
+require 'json'
+require 'time'
+require 'set'
+require 'rubygems'
+require 'date'
+
+# Check for numeric value
+def is_numeric?(obj) 
+   obj.to_s.match(/\A[+-]?\d+?(\.\d+)?\Z/) == nil ? false : true
+end
+
+# Create new mysql2 client
+db = Mysql2::Client.new(:host => "db.appbackr.com", :username => "anil", :password => "ewb@rK0ns", :database => "finapps")
+
+china_table = "xchange2_eval_android_china_pkg_myapp"
+base_url = "http://android.myapp.com/myapp/detail.htm?apkName="
+
+# Get datestring
+datestring = Date.today.strftime("%Y-%m")
+
+# Build a hash from the local file
+gps_hsh = Hash.new
+puts ">> Prepare local app data..."
+CSV.foreach("#{datestring}-all_apps.csv") do |row|
+	id = row[0]
+	url = row[1]
+
+	gps_hsh[id] = url
+end
+puts "<< ...done."
+
+# Define queries
+count_q = "select count(distinct(pkg_id)) from #{china_table}" #Get the count of the different titles
+row_q = "select count(pkg_id) from #{china_table}"
+get_q = "SELECT pkg_id, namespace from #{china_table} LIMIT 900000"#Get the titles for comparison
+
+get_q = "SELECT pkg_id, namespace, title, package_id from xchange2_eval_android_china_pkg_myapp cn_pkg
+INNER JOIN scrape_china_myapp scrp ON scrp.package_id = cn_pkg.pkg_id
+LIMIT 9000000"
+
+
+# Get namespaces for crosswalk
+sdk_q = "SELECT sdk_title, mixrank_slug_id, namespaces FROM xchange2_eval_android_sdk
+		WHERE mixrank_slug_id LIKE 'apache-cordova'
+		OR mixrank_slug_id LIKE 'phonegap'
+		OR mixrank_slug_id LIKE 'appmobi'
+		OR mixrank_slug_id LIKE 'crosswalk'
+		OR mixrank_slug_id LIKE 'cocos2d'"
+
+puts ">> Query crosswalk namespaces..."
+sdks_arr = db.query(sdk_q).to_a
+puts "<< ...done."
+sdk_hsh = {}
+
+sdks_arr.each do |row|
+	sdk_hsh[row['mixrank_slug_id']] = JSON.parse(row['namespaces'])['namespaces']
+end
+
+# Get the total and the count of unique apps in the table
+total = db.query(count_q).to_a[0]["count(distinct(pkg_id))"]
+titles = []
+puts ">> Query China Table..."
+titles = db.query(get_q).to_a
+puts "<< ...done."
+puts "Inspecting #{titles.length}..."
+row_count = db.query(row_q).to_a[0]["count(pkg_id)"]
+
+puts "#{total} China Apps"
+puts "#{row_count} rows"
+done_hsh = {'apache-cordova'=>[], 'phonegap'=>[], 'appmobi'=>[], 'crosswalk'=>[], 'cocos2d'=>[]}
+id_data_hsh = {}
+
+titles.each do |row|
+	id = row['pkg_id']
+	nspace = row['namespace']
+	if is_numeric?(id)
+		id = row['package_id']
+	end
+	#nspace = "org.cocos2d.realblock"
+	#puts "checking #{id}, |#{nspace}|"
+
+	sdk_hsh.each do |slug, sdk|
+		if sdk.include?(nspace)
+			#puts "#{id} is using #{slug}"
+			if !done_hsh[slug].include?(id)
+				done_hsh[slug].push(id)
+				if !id_data_hsh.has_key?(id)
+					url = "#{base_url}#{id}"
+					app_title = row['title']
+					puts "#{url}, #{app_title}"
+					id_data_hsh[id] = {'url' => url, 'app_title' => app_title}
+				end
+			end
+		end
+	end
+end
+
+puts "==="
+
+# Output file
+outfile = File.open(("#{datestring}-10cent_apps.csv"), "w")
+
+outfile.puts ["sdk", "app_id", "title", "china_url", "gplay_url"].to_csv
+
+matched_count = 0
+no_url_count = 0
+match_hsh = Hash.new(0)
+done_hsh.each do |key, val|
+	if val.length == 0
+		puts "Nothing for #{key}"
+	else
+		val.each do |v|
+			#puts "#{v} is using #{key}"
+			url = gps_hsh[v]
+
+			if url.nil?
+				url = "NA"
+				no_url_count += 1
+			end
+
+			final = [key, v, id_data_hsh[v]['app_title'], id_data_hsh[v]['url'], url]
+			outfile.puts final.to_csv
+			matched_count += 1
+			match_hsh[key] += 1
+		end
+	end
+
+	puts "--"
+end
+
+outfile.close
+
+url_count = matched_count - no_url_count
+puts "Matched #{matched_count} apps"
+puts "Google Play Matches: #{url_count}"
+match_hsh.each do |key,val|
+	puts "#{key}: #{val}"
+end
+
+
+
+
