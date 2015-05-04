@@ -1,4 +1,9 @@
-# This script uses the MixRank API to get the full list of devices with specific installed SDKs
+# This script compares the namespaces for all 10cent apps (myapp) to known SDK namespaces
+# and reports matches. It also checks for android ID matches with our google play scrape
+# and lists a google play store URL if a match is found.
+
+# Final output is a CSV listing:
+# SDK, Android ID, App Title, URL on China Store, and Google Play URL
 
 require 'mysql2'
 require 'csv'

@@ -1,4 +1,4 @@
-# This script uses the MixRank API to get the full list of devices with specific installed SDKs
+# This script creates a CSV with android_ids and google play store URLs in your working directory.
 
 require 'mysql2'
 require 'csv'
